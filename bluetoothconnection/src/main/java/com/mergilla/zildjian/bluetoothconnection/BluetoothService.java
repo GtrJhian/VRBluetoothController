@@ -3,6 +3,7 @@ package com.mergilla.zildjian.bluetoothconnection;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothSocket;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -13,7 +14,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.UUID;
 
+import static android.support.v4.app.ActivityCompat.startActivityForResult;
+import static android.support.v4.content.ContextCompat.startActivity;
+
 public class BluetoothService {
+
     private static final String TAG = "MY_APP_DEBUG_TAG";
     private Handler mHandler; // handler that gets info from BluetoothService service
 
@@ -26,25 +31,46 @@ public class BluetoothService {
 
         // ... (Add other message types here as needed.)
     }
-
+    private BluetoothDevice device=null;
+    private final static BluetoothAdapter bluetoothAdapter=BluetoothAdapter.getDefaultAdapter();
+    private BluetoothSocket socket=null;
+    public ConnectedThread serviceThread=null;
+    UUID uuid=UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
     public void startThread(){
-        BluetoothAdapter bluetoothAdapter=BluetoothAdapter.getDefaultAdapter();
+        Log.d(BluetoothService.TAG,"Starting Bluetooth Service Thread");
+        Log.d(TAG,"Checkpoint: Query default bluetooth adapter : "+bluetoothAdapter.getName());
+        if(bluetoothAdapter==null){
+            Log.d(TAG,"No Bluetooth Adapter");
+        }
+        else{
+            Log.d(TAG,"Bluetooth Adapter Address: "+bluetoothAdapter.getAddress());
+            for (BluetoothDevice d: bluetoothAdapter.getBondedDevices()
+                 ) {
+                Log.d(TAG,"Bluetooth Device Name: "+d.getName());
+                Log.d(TAG,"Bluetooth Device Address: "+d.getAddress());
+            }
+        }
         byte[] address={0x20,0x16,0x12,0x21,0x42,0x56};
-        BluetoothDevice device=bluetoothAdapter.getRemoteDevice(address);
-        BluetoothSocket socket=null;
+        device=bluetoothAdapter.getRemoteDevice(address);
         try {
-            socket=device.createInsecureRfcommSocketToServiceRecord(UUID.randomUUID());
+            socket=device.createInsecureRfcommSocketToServiceRecord(uuid);
+            bluetoothAdapter.getDefaultAdapter().cancelDiscovery();
+
+            socket.connect();
+            Log.d(TAG,"Successfully Connected");
         } catch (IOException e) {
-            Log.e(BluetoothService.TAG,e.toString());
+            Log.e(BluetoothService.TAG,"Error connecting socket",e);
         }
         if(socket!=null){
-            ConnectedThread serviceThread=new ConnectedThread(socket);
+            serviceThread=new ConnectedThread(socket);
             serviceThread.start();
             Log.d(BluetoothService.TAG,"Connected Thread Started");
         }
-        else Log.e(BluetoothService.TAG,"Unable to initialize ConnectedThread socket is null");
+        else Log.d(BluetoothService.TAG,"Unable to initialize ConnectedThread socket is null");
     }
-
+    public void write(byte[] bytes){
+        serviceThread.write(bytes);
+    }
     private class ConnectedThread extends Thread {
         private final BluetoothSocket mmSocket;
         private final InputStream mmInStream;
@@ -55,7 +81,6 @@ public class BluetoothService {
             mmSocket = socket;
             InputStream tmpIn = null;
             OutputStream tmpOut = null;
-
             // Get the input and output streams; using temp objects because
             // member streams are final.
             try {
@@ -75,22 +100,24 @@ public class BluetoothService {
 
         public void run() {
             Log.d(BluetoothService.TAG,"Thread Started");
-            mmBuffer = new byte[1024];
+            //mmBuffer = new byte[1024];
             int numBytes; // bytes returned from read()
 
             // Keep listening to the InputStream until an exception occurs.
             while (true) {
                 try {
                     // Read from the InputStream.
-                    numBytes = mmInStream.read(mmBuffer);
+                    String out="";
+                    char c;
+                    while((c=(char)mmInStream.read())!=(char)10){
+                        out+=c;
+                    }
+                    //numBytes = mmInStream.read(mmBuffer);
                     // Send the obtained bytes to the UI activity.
-                    Message readMsg = mHandler.obtainMessage(
-                            MessageConstants.MESSAGE_READ, numBytes, -1,
-                            mmBuffer);
-                    readMsg.sendToTarget();
-                    Log.d(BluetoothService.TAG,new String(mmBuffer));
+                    //Log.d(TAG,"Bytes Received : "+numBytes);
+                    Log.d(BluetoothService.TAG,new String(out));
                 } catch (IOException e) {
-                    Log.d(TAG, "Input stream was disconnected", e);
+                    Log.e(TAG, "Input stream was disconnected", e);
                     break;
                 }
             }
@@ -99,10 +126,6 @@ public class BluetoothService {
         public void write(byte[] bytes) {
             try {
                 mmOutStream.write(bytes);
-                // Share the sent message with the UI activity.
-                Message writtenMsg = mHandler.obtainMessage(
-                        MessageConstants.MESSAGE_WRITE, -1, -1, mmBuffer);
-                writtenMsg.sendToTarget();
             } catch (IOException e) {
                 Log.e(TAG, "Error occurred when sending data", e);
 
